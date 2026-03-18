@@ -5,10 +5,12 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "wsPort": { "type": "number" }
+      "wsPort": { "type": "number" },
+      "authToken": { "type": "string" }
     }
   },
   "uiHints": {
-    "wsPort": { "label": "WebSocket port", "placeholder": "8765" }
+    "wsPort": { "label": "WebSocket port", "placeholder": "8765" },
+    "authToken": { "label": "Auth Token", "sensitive": true, "placeholder": "token secreto compartilhado com o cliente" }
   }
 }

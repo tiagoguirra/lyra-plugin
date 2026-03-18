@@ -3,15 +3,6 @@
  * Simula streaming de resposta com delay entre chunks.
  */
 
-const MOCK_RESPONSES: Record<string, string[]> = {
-  default: [
-    "Recebi sua mensagem: ",
-    '"{text}"',
-    ". Este é o agente mockado.",
-    " Canal Lyra funcionando corretamente!",
-  ],
-};
-
 async function* mockStreamChunks(text: string): AsyncGenerator<string> {
   const parts = [
     `Recebi sua mensagem: "${text}". `,

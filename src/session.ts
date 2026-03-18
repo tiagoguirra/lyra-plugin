@@ -11,6 +11,7 @@ export interface VoiceSession {
   createdAt: Date;
   state: SessionState;
   lastText: string;
+  authenticated: boolean;
 }
 
 export function createSession(ws: any, id: string): VoiceSession {
@@ -21,5 +22,6 @@ export function createSession(ws: any, id: string): VoiceSession {
     createdAt: new Date(),
     state: "idle",
     lastText: "",
+    authenticated: false,
   };
 }

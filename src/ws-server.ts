@@ -26,6 +26,21 @@ export class LyraWebSocketServer {
       sendMessage(ws, { type: "session_start", sessionId: id });
       this.api.logger.info(`[lyra-ws] session started: ${id}`);
 
+      // Timer de autenticação: cliente tem 5s para enviar auth
+      const authTimeout = setTimeout(() => {
+        if (!session.authenticated) {
+          sendMessage(ws, { type: "auth_error", message: "authentication timeout" });
+          ws.close(4401, "authentication timeout");
+          this.sessions.delete(id);
+        }
+      }, 5000);
+
+      ws.on("close", () => {
+        clearTimeout(authTimeout);
+        this.sessions.delete(id);
+        this.api.logger.info(`[lyra-ws] session closed: ${id}`);
+      });
+
       ws.on("message", (raw) => {
         let msg: ClientMessage;
         try {
@@ -35,10 +50,48 @@ export class LyraWebSocketServer {
           return;
         }
 
+        // ── Handshake de autenticação ────────────────────────────────────────
+        if (!session.authenticated) {
+          if (msg.type === "auth") {
+            const expectedToken: string | undefined = this.cfg.authToken;
+
+            if (!expectedToken) {
+              // Sem token configurado → aceitar qualquer conexão (modo dev)
+              session.authenticated = true;
+              clearTimeout(authTimeout);
+              sendMessage(ws, { type: "auth_ok" });
+              this.api.logger.info(`[lyra-ws] session authenticated (no token configured): ${id}`);
+              return;
+            }
+
+            if (msg.token === expectedToken) {
+              session.authenticated = true;
+              clearTimeout(authTimeout);
+              sendMessage(ws, { type: "auth_ok" });
+              this.api.logger.info(`[lyra-ws] session authenticated: ${id}`);
+            } else {
+              sendMessage(ws, { type: "auth_error", message: "unauthorized" });
+              ws.close(4401, "unauthorized");
+              this.sessions.delete(id);
+            }
+          } else {
+            // Mensagem antes de autenticar → avisar, não fechar
+            sendMessage(ws, { type: "auth_error", message: "not authenticated" });
+          }
+          return;
+        }
+
+        // ── Fluxo normal (sessão autenticada) ────────────────────────────────
         if (msg.type === "transcript") {
-          session.lastText = msg.text;
           session.state = "receiving";
-          this.api.logger.info(`[lyra-ws] transcript [${id}]: "${msg.text}" final=${msg.is_final}`);
+          if (msg.is_final) {
+            session.lastText = session.lastText
+              ? `${session.lastText} ${msg.text}`
+              : msg.text;
+          }
+          this.api.logger.info(
+            `[lyra-ws] transcript [${id}] final=${msg.is_final}: "${msg.text}"`
+          );
           return;
         }
 
@@ -53,11 +106,6 @@ export class LyraWebSocketServer {
           });
           return;
         }
-      });
-
-      ws.on("close", () => {
-        this.sessions.delete(id);
-        this.api.logger.info(`[lyra-ws] session closed: ${id}`);
       });
     });
 

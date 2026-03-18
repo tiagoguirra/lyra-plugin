@@ -1,15 +1,20 @@
 /**
- * Script de teste standalone — simula o bootstrap do OpenClaw com mock agent.
- * Roda o WebSocket server sem precisar do OpenClaw instalado.
+ * Script de teste standalone — simula o bootstrap completo do OpenClaw.
+ * Usa o register() real de index.ts com mock agent e mock das APIs do gateway.
  *
  * Uso:
  *   npx ts-node test-standalone.ts
  *
  * Depois conecte via: wscat -c ws://localhost:8765
+ *
+ * Fluxo de teste:
+ *   1. Conectar → recebe { "type": "session_start", "sessionId": "..." }
+ *   2. Enviar   → { "type": "transcript", "text": "qual o clima hoje?", "is_final": true }
+ *   3. Enviar   → { "type": "end_of_speech" }
+ *             → recebe chunks { "type": "reply", ... } finalizando com "is_final": true
  */
 
-import { registerLyraChannel } from "./src/channel";
-import { LyraWebSocketServer } from "./src/ws-server";
+import register from "./index";
 import { buildMockApi } from "./src/mock-agent";
 
 const logger = {
@@ -19,11 +24,10 @@ const logger = {
 };
 
 const services: Record<string, { start: () => void; stop: () => void }> = {};
-const commands: Record<string, any> = {};
-const gatewayMethods: Record<string, any> = {};
 
 const mockApi = {
   ...buildMockApi(logger),
+
   config: {
     plugins: {
       entries: {
@@ -31,49 +35,48 @@ const mockApi = {
       },
     },
   },
+
   registerChannel({ plugin }: any) {
-    logger.info(`[openclaw-mock] registerChannel called: id=${plugin.id}`);
-    logger.info(`[openclaw-mock]   label: ${plugin.meta.label}`);
-    logger.info(`[openclaw-mock]   aliases: ${plugin.meta.aliases.join(", ")}`);
-    logger.info(`[openclaw-mock]   deliveryMode: ${plugin.outbound.deliveryMode}`);
-    logger.info("[openclaw-mock] ✓ Canal registrado com sucesso");
+    logger.info(`[openclaw-mock] registerChannel → id="${plugin.id}"`);
+    logger.info(`[openclaw-mock]   label    : ${plugin.meta.label}`);
+    logger.info(`[openclaw-mock]   aliases  : ${plugin.meta.aliases.join(", ")}`);
+    logger.info(`[openclaw-mock]   chatTypes: ${plugin.capabilities.chatTypes.join(", ")}`);
+    logger.info(`[openclaw-mock]   delivery : ${plugin.outbound.deliveryMode}`);
+    logger.info("[openclaw-mock] ✓ Canal registrado");
   },
-  registerService(svc: any) {
-    logger.info(`[openclaw-mock] registerService: ${svc.id}`);
+
+  registerService(svc: { id: string; start: () => void; stop: () => void }) {
+    logger.info(`[openclaw-mock] registerService → id="${svc.id}"`);
     services[svc.id] = svc;
   },
-  registerGatewayMethod(name: string, handler: any) {
-    logger.info(`[openclaw-mock] registerGatewayMethod: ${name}`);
-    gatewayMethods[name] = handler;
+
+  registerGatewayMethod(name: string, _handler: any) {
+    logger.info(`[openclaw-mock] registerGatewayMethod → "${name}"`);
   },
-  registerCommand(cmd: any) {
-    logger.info(`[openclaw-mock] registerCommand: /${cmd.name} — ${cmd.description}`);
-    commands[cmd.name] = cmd;
+
+  registerCommand(cmd: { name: string; description: string }) {
+    logger.info(`[openclaw-mock] registerCommand → /${cmd.name} (${cmd.description})`);
   },
 };
 
-// Bootstrap
-logger.info("=== Lyra Plugin — Teste Standalone ===");
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+logger.info("=== Lyra Plugin — Teste Standalone ===\n");
 
-// Registrar canal (testa o registerChannel)
-registerLyraChannel(mockApi);
+register(mockApi);
 
-// Iniciar WebSocket server
-const cfg = { wsPort: 8765 };
-const wsServer = new LyraWebSocketServer(mockApi, cfg);
-wsServer.start();
+// Iniciar serviços registrados (OpenClaw faria isso no gateway start)
+for (const [id, svc] of Object.entries(services)) {
+  logger.info(`[openclaw-mock] starting service "${id}"`);
+  svc.start();
+}
 
-logger.info("");
-logger.info("Conecte via: wscat -c ws://localhost:8765");
-logger.info("Envie: {\"type\":\"transcript\",\"text\":\"olá mundo\",\"is_final\":true}");
-logger.info("Envie: {\"type\":\"end_of_speech\",\"text\":\"\",\"is_final\":true}");
-logger.info("Ctrl+C para encerrar");
-
-// Simular lyrastatus command
-logger.info(`\n[slash-cmd /lyrastatus] Active voice sessions: ${wsServer.activeSessions()}`);
+logger.info("\nPronto. Conecte via: wscat -c ws://localhost:8765");
+logger.info('Transcrição: {"type":"transcript","text":"qual o clima hoje?","is_final":true}');
+logger.info('Disparar:    {"type":"end_of_speech"}');
+logger.info("Ctrl+C para encerrar\n");
 
 process.on("SIGINT", () => {
   logger.info("Encerrando...");
-  wsServer.stop();
+  for (const svc of Object.values(services)) svc.stop();
   process.exit(0);
 });
