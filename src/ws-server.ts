@@ -152,14 +152,15 @@ export class LyraWebSocketServer {
   ): Promise<void> {
     session.state = "processing";
 
-    const gatewayPort = this.api.config?.gateway?.port ?? 18789;
+    const gatewayPort: number = this.api.config?.gateway?.port ?? 18789;
     const gatewayUrl = `ws://127.0.0.1:${gatewayPort}`;
     const gatewayToken: string = this.api.config?.gateway?.auth?.token ?? "";
-    const reqId = randomUUID();
+    const connectReqId = randomUUID();
+    const chatReqId = randomUUID();
 
     return new Promise<void>((resolve, reject) => {
       const gws = new WsClient(gatewayUrl);
-      let connected = false;
+      let connectDone = false;
       let settled = false;
 
       const settle = (fn: () => void) => {
@@ -173,19 +174,14 @@ export class LyraWebSocketServer {
         fn();
       };
 
+      const fail = (message: string) => {
+        this.api.logger.error(`[lyra] ${message}`);
+        sendMessage(session.ws, { type: "error", message });
+        settle(() => reject(new Error(message)));
+      };
+
       gws.on("open", () => {
-        // Passo 1: autenticar no Gateway interno
-        gws.send(
-          JSON.stringify({
-            type: "req",
-            id: "lyra-connect",
-            method: "connect",
-            params: {
-              auth: { token: gatewayToken },
-              deviceId: `lyra-plugin-${session.id}`,
-            },
-          }),
-        );
+        // Aguardar o connect.challenge do Gateway antes de enviar connect
       });
 
       gws.on("message", (raw: Buffer) => {
@@ -196,23 +192,46 @@ export class LyraWebSocketServer {
           return;
         }
 
-        // Passo 2: connect confirmado → enviar mensagem ao agente
-        if (!connected && msg.id === "lyra-connect") {
-          if (!msg.ok) {
-            const errMsg: string = msg.error?.message ?? "gateway auth failed";
-            this.api.logger.error(`[lyra] gateway auth error: ${errMsg}`);
-            sendMessage(session.ws, { type: "error", message: errMsg });
-            settle(reject.bind(null, new Error(errMsg)));
-            return;
-          }
-
-          connected = true;
-          session.state = "streaming";
-
+        // Passo 1: receber challenge → responder com connect + nonce
+        if (
+          msg.type === "event" &&
+          msg.event === "connect.challenge" &&
+          !connectDone
+        ) {
+          const nonce: string = msg.payload?.nonce ?? "";
           gws.send(
             JSON.stringify({
               type: "req",
-              id: reqId,
+              id: connectReqId,
+              method: "connect",
+              params: {
+                minProtocol: 3,
+                maxProtocol: 3,
+                client: {
+                  id: "cli",
+                  version: "dev",
+                  platform: "linux",
+                  mode: "cli",
+                },
+                auth: { token: gatewayToken, nonce },
+              },
+            }),
+          );
+          return;
+        }
+
+        // Passo 2: connect confirmado → enviar mensagem ao agente
+        if (msg.type === "res" && msg.id === connectReqId) {
+          if (!msg.ok) {
+            fail(msg.error?.message ?? "gateway auth failed");
+            return;
+          }
+          connectDone = true;
+          session.state = "streaming";
+          gws.send(
+            JSON.stringify({
+              type: "req",
+              id: chatReqId,
               method: "chat.send",
               params: {
                 text,
@@ -227,10 +246,9 @@ export class LyraWebSocketServer {
         if (
           msg.type === "event" &&
           msg.event === "agent" &&
-          msg.runId === reqId
+          msg.runId === chatReqId
         ) {
           const delta = msg.data;
-
           if (
             delta?.stream === "assistant" &&
             typeof delta.text === "string" &&
@@ -242,7 +260,6 @@ export class LyraWebSocketServer {
               is_final: false,
             });
           }
-
           if (delta?.status === "done" || delta?.final === true) {
             sendMessage(session.ws, {
               type: "reply",
@@ -254,30 +271,17 @@ export class LyraWebSocketServer {
           return;
         }
 
-        // Passo 4: ack do chat.send (ok) ou erro
-        if (msg.type === "res" && msg.id === reqId) {
-          if (!msg.ok) {
-            const errMsg: string = msg.error?.message ?? "agent error";
-            this.api.logger.error(`[lyra] chat.send error: ${errMsg}`);
-            sendMessage(session.ws, { type: "error", message: errMsg });
-            settle(reject.bind(null, new Error(errMsg)));
-          }
-          // ok === true é apenas ack — eventos chegam via event:agent
-          return;
+        // Erro no chat.send
+        if (msg.type === "res" && msg.id === chatReqId && !msg.ok) {
+          fail(msg.error?.message ?? "chat.send failed");
         }
       });
 
       gws.on("error", (err: Error) => {
-        this.api.logger.error("[lyra] gateway ws error:", err.message);
-        sendMessage(session.ws, {
-          type: "error",
-          message: "gateway connection failed",
-        });
-        settle(reject.bind(null, err));
+        fail(`gateway connection failed: ${err.message}`);
       });
 
       gws.on("close", () => {
-        // Fechou sem resolver (ex: gateway reiniciou durante o run)
         settle(() => {
           sendMessage(session.ws, {
             type: "error",
