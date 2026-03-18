@@ -1,4 +1,4 @@
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket as WsClient } from "ws";
 import { randomUUID } from "crypto";
 import { createSession, VoiceSession } from "./session";
 import { sendMessage, ClientMessage } from "./messages";
@@ -7,7 +7,10 @@ export class LyraWebSocketServer {
   private wss: WebSocketServer | null = null;
   private sessions = new Map<string, VoiceSession>();
 
-  constructor(private api: any, private cfg: any) {}
+  constructor(
+    private api: any,
+    private cfg: any,
+  ) {}
 
   start(): void {
     const port: number = this.cfg.wsPort ?? 8765;
@@ -15,7 +18,9 @@ export class LyraWebSocketServer {
     this.wss = new WebSocketServer({ port });
 
     this.wss.on("listening", () => {
-      this.api.logger.info(`[lyra-ws] WebSocket server listening on port ${port}`);
+      this.api.logger.info(
+        `[lyra-ws] WebSocket server listening on port ${port}`,
+      );
     });
 
     this.wss.on("connection", (ws) => {
@@ -29,7 +34,10 @@ export class LyraWebSocketServer {
       // Timer de autenticação: cliente tem 5s para enviar auth
       const authTimeout = setTimeout(() => {
         if (!session.authenticated) {
-          sendMessage(ws, { type: "auth_error", message: "authentication timeout" });
+          sendMessage(ws, {
+            type: "auth_error",
+            message: "authentication timeout",
+          });
           ws.close(4401, "authentication timeout");
           this.sessions.delete(id);
         }
@@ -60,7 +68,9 @@ export class LyraWebSocketServer {
               session.authenticated = true;
               clearTimeout(authTimeout);
               sendMessage(ws, { type: "auth_ok" });
-              this.api.logger.info(`[lyra-ws] session authenticated (no token configured): ${id}`);
+              this.api.logger.info(
+                `[lyra-ws] session authenticated (no token configured): ${id}`,
+              );
               return;
             }
 
@@ -76,7 +86,10 @@ export class LyraWebSocketServer {
             }
           } else {
             // Mensagem antes de autenticar → avisar, não fechar
-            sendMessage(ws, { type: "auth_error", message: "not authenticated" });
+            sendMessage(ws, {
+              type: "auth_error",
+              message: "not authenticated",
+            });
           }
           return;
         }
@@ -90,7 +103,7 @@ export class LyraWebSocketServer {
               : msg.text;
           }
           this.api.logger.info(
-            `[lyra-ws] transcript [${id}] final=${msg.is_final}: "${msg.text}"`
+            `[lyra-ws] transcript [${id}] final=${msg.is_final}: "${msg.text}"`,
           );
           return;
         }
@@ -101,9 +114,20 @@ export class LyraWebSocketServer {
             sendMessage(ws, { type: "error", message: "empty transcript" });
             return;
           }
-          this.streamAgentResponse(session, text).catch((err) => {
-            this.api.logger.error(`[lyra-ws] unhandled stream error [${id}]:`, err);
-          });
+          (async () => {
+            try {
+              await this.streamAgentResponse(session, text);
+            } catch (err) {
+              this.api.logger.error(
+                `[lyra-ws] streamAgentResponse error on session ${id}:`,
+                err,
+              );
+              // sendMessage já foi chamado dentro de streamAgentResponse
+            } finally {
+              session.state = "idle";
+              session.lastText = "";
+            }
+          })();
           return;
         }
       });
@@ -122,39 +146,146 @@ export class LyraWebSocketServer {
     return this.sessions.size;
   }
 
-  private async streamAgentResponse(session: VoiceSession, text: string): Promise<void> {
+  private async streamAgentResponse(
+    session: VoiceSession,
+    text: string,
+  ): Promise<void> {
     session.state = "processing";
 
-    try {
-      if (typeof this.api.agent?.streamMessage === "function") {
-        session.state = "streaming";
+    const gatewayPort = this.api.config?.gateway?.port ?? 18789;
+    const gatewayUrl = `ws://127.0.0.1:${gatewayPort}`;
+    const gatewayToken: string = this.api.config?.gateway?.auth?.token ?? "";
+    const reqId = randomUUID();
 
-        const stream = await this.api.agent.streamMessage({
-          channel: session.agentChannel,
-          text,
-          userId: `voice:${session.id}`,
-        });
+    return new Promise<void>((resolve, reject) => {
+      const gws = new WsClient(gatewayUrl);
+      let connected = false;
+      let settled = false;
 
-        for await (const chunk of stream) {
-          sendMessage(session.ws, { type: "reply", text: chunk, is_final: false });
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        session.state = "idle";
+        session.lastText = "";
+        try {
+          gws.close();
+        } catch {}
+        fn();
+      };
+
+      gws.on("open", () => {
+        // Passo 1: autenticar no Gateway interno
+        gws.send(
+          JSON.stringify({
+            type: "req",
+            id: "lyra-connect",
+            method: "connect",
+            params: {
+              auth: { token: gatewayToken },
+              deviceId: `lyra-plugin-${session.id}`,
+            },
+          }),
+        );
+      });
+
+      gws.on("message", (raw: Buffer) => {
+        let msg: any;
+        try {
+          msg = JSON.parse(raw.toString());
+        } catch {
+          return;
         }
 
-        sendMessage(session.ws, { type: "reply", text: "", is_final: true });
-      } else {
-        const reply = await this.api.agent.sendMessage({
-          channel: session.agentChannel,
-          text,
-          userId: `voice:${session.id}`,
-        });
+        // Passo 2: connect confirmado → enviar mensagem ao agente
+        if (!connected && msg.id === "lyra-connect") {
+          if (!msg.ok) {
+            const errMsg: string = msg.error?.message ?? "gateway auth failed";
+            this.api.logger.error(`[lyra] gateway auth error: ${errMsg}`);
+            sendMessage(session.ws, { type: "error", message: errMsg });
+            settle(reject.bind(null, new Error(errMsg)));
+            return;
+          }
 
-        sendMessage(session.ws, { type: "reply", text: reply, is_final: true });
-      }
-    } catch (error) {
-      this.api.logger.error(`[lyra-ws] agent error on session ${session.id}:`, error);
-      sendMessage(session.ws, { type: "error", message: (error as Error).message });
-    } finally {
-      session.state = "idle";
-      session.lastText = "";
-    }
+          connected = true;
+          session.state = "streaming";
+
+          gws.send(
+            JSON.stringify({
+              type: "req",
+              id: reqId,
+              method: "chat.send",
+              params: {
+                text,
+                sessionKey: `lyra-channel:${session.id}`,
+              },
+            }),
+          );
+          return;
+        }
+
+        // Passo 3: chunks de streaming do agente
+        if (
+          msg.type === "event" &&
+          msg.event === "agent" &&
+          msg.runId === reqId
+        ) {
+          const delta = msg.data;
+
+          if (
+            delta?.stream === "assistant" &&
+            typeof delta.text === "string" &&
+            delta.text
+          ) {
+            sendMessage(session.ws, {
+              type: "reply",
+              text: delta.text,
+              is_final: false,
+            });
+          }
+
+          if (delta?.status === "done" || delta?.final === true) {
+            sendMessage(session.ws, {
+              type: "reply",
+              text: "",
+              is_final: true,
+            });
+            settle(resolve);
+          }
+          return;
+        }
+
+        // Passo 4: ack do chat.send (ok) ou erro
+        if (msg.type === "res" && msg.id === reqId) {
+          if (!msg.ok) {
+            const errMsg: string = msg.error?.message ?? "agent error";
+            this.api.logger.error(`[lyra] chat.send error: ${errMsg}`);
+            sendMessage(session.ws, { type: "error", message: errMsg });
+            settle(reject.bind(null, new Error(errMsg)));
+          }
+          // ok === true é apenas ack — eventos chegam via event:agent
+          return;
+        }
+      });
+
+      gws.on("error", (err: Error) => {
+        this.api.logger.error("[lyra] gateway ws error:", err.message);
+        sendMessage(session.ws, {
+          type: "error",
+          message: "gateway connection failed",
+        });
+        settle(reject.bind(null, err));
+      });
+
+      gws.on("close", () => {
+        // Fechou sem resolver (ex: gateway reiniciou durante o run)
+        settle(() => {
+          sendMessage(session.ws, {
+            type: "error",
+            message: "gateway disconnected",
+          });
+          reject(new Error("gateway disconnected"));
+        });
+      });
+    });
   }
 }
