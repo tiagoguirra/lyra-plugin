@@ -1,0 +1,14 @@
+{
+  "id": "lyra-plugin",
+  "name": "Lyra Channel",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "wsPort": { "type": "number" }
+    }
+  },
+  "uiHints": {
+    "wsPort": { "label": "WebSocket port", "placeholder": "8765" }
+  }
+}
