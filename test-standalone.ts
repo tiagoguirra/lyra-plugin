@@ -31,7 +31,7 @@ const mockApi = {
   config: {
     plugins: {
       entries: {
-        "lyra-plugin": { config: { wsPort: 8765 } },
+        "lyra-voice-plugin": { config: { wsPort: 8765 } },
       },
     },
   },

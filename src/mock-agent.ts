@@ -1,13 +1,13 @@
 /**
- * Mock agent para testar o canal sem precisar do agente real do OpenClaw.
- * Simula streaming de resposta com delay entre chunks.
+ * Mock agent for testing the channel without a real Openclaw agent.
+ * Simulates streaming responses with a delay between chunks.
  */
 
 async function* mockStreamChunks(text: string): AsyncGenerator<string> {
   const parts = [
-    `Recebi sua mensagem: "${text}". `,
-    "Este é o agente mockado. ",
-    "Canal Lyra funcionando corretamente!",
+    `Received your message: "${text}". `,
+    "This is the mock agent. ",
+    "Lyra voice channel is working correctly!",
   ];
 
   for (const part of parts) {
@@ -27,7 +27,7 @@ export function buildMockApi(logger: any): any {
       async sendMessage({ channel, text, userId }: { channel: string; text: string; userId: string }) {
         logger.info(`[mock-agent] sendMessage channel=${channel} userId=${userId} text="${text}"`);
         await new Promise((res) => setTimeout(res, 300));
-        return `Recebi: "${text}". Canal Lyra OK (fallback).`;
+        return `Received: "${text}". Lyra channel OK (fallback).`;
       },
     },
   };

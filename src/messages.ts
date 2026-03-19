@@ -1,18 +1,35 @@
-export type ClientMessageType = "auth" | "transcript" | "end_of_speech";
+// ── Mensagens do cliente → servidor ──────────────────────────────────────────
 
 export interface AuthMessage {
   type: "auth";
   token: string;
+  clientId: string;
 }
 
-export interface ClientMessage {
-  type: ClientMessageType;
-  text: string;
-  is_final: boolean;
-  token: string;
+export interface WakeDetectedMessage {
+  type: "wake_detected";
 }
 
-export type ServerMessageType = "session_start" | "auth_ok" | "auth_error" | "reply" | "error";
+export interface EndOfAudioMessage {
+  type: "end_of_audio";
+}
+
+export interface PlaybackDoneMessage {
+  type: "playback_done";
+}
+
+export interface CancelMessage {
+  type: "cancel";
+}
+
+export type ClientMessage =
+  | AuthMessage
+  | WakeDetectedMessage
+  | EndOfAudioMessage
+  | PlaybackDoneMessage
+  | CancelMessage;
+
+// ── Mensagens do servidor → cliente ──────────────────────────────────────────
 
 export interface SessionStartMessage {
   type: "session_start";
@@ -21,6 +38,8 @@ export interface SessionStartMessage {
 
 export interface AuthOkMessage {
   type: "auth_ok";
+  sessionId: string;
+  clientId: string;
 }
 
 export interface AuthErrorMessage {
@@ -28,22 +47,43 @@ export interface AuthErrorMessage {
   message: string;
 }
 
-export interface ReplyChunk {
-  type: "reply";
+export interface ReadyForAudioMessage {
+  type: "ready_for_audio";
+}
+
+export interface SttResultMessage {
+  type: "stt_result";
   text: string;
   is_final: boolean;
+}
+
+export interface ThinkingMessage {
+  type: "thinking";
+}
+
+export interface AudioDoneMessage {
+  type: "audio_done";
+}
+
+export interface AskUserMessage {
+  type: "ask_user";
 }
 
 export interface ErrorMessage {
   type: "error";
   message: string;
+  code?: "stt_failed" | "tts_failed" | "agent_failed";
 }
 
 export type ServerMessage =
   | SessionStartMessage
   | AuthOkMessage
   | AuthErrorMessage
-  | ReplyChunk
+  | ReadyForAudioMessage
+  | SttResultMessage
+  | ThinkingMessage
+  | AudioDoneMessage
+  | AskUserMessage
   | ErrorMessage;
 
 export function sendMessage(ws: any, msg: ServerMessage): void {

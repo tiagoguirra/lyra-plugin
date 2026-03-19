@@ -3,8 +3,8 @@ export function registerLyraChannel(api: any): void {
     id: "lyra-channel",
     meta: {
       id: "lyra-channel",
-      label: "Lyra Channel",
-      selectionLabel: "Lyra Channel (WebSocket)",
+      label: "Lyra Voice Plugin",
+      selectionLabel: "Lyra Voice Plugin (WebSocket)",
       docsPath: "/channels/lyra-channel",
       blurb: "Text-based voice channel. STT and TTS handled by the client.",
       aliases: ["lyra", "lc"],
@@ -20,7 +20,7 @@ export function registerLyraChannel(api: any): void {
     },
     outbound: {
       deliveryMode: "direct",
-      // Respostas vão pelo WebSocket via streaming — outbound é no-op
+      // Responses are delivered via WebSocket streaming — outbound is a no-op
       sendText: async () => ({ ok: true }),
     },
   };

@@ -1,2 +1,10 @@
 node_modules/
 dist/
+
+# Build artifacts
+*.js.map
+*.d.ts
+
+# OS
+.DS_Store
+Thumbs.db

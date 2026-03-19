@@ -1,16 +1,103 @@
 {
-  "id": "lyra-plugin",
-  "name": "Lyra Channel",
+  "id": "lyra-voice-plugin",
+  "name": "Lyra Voice Plugin",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "wsPort": { "type": "number" },
-      "authToken": { "type": "string" }
+      "wsPort": {
+        "type": "number"
+      },
+      "authToken": {
+        "type": "string"
+      },
+      "stt": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "default": "deepgram"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "default": "nova-3"
+          },
+          "language": {
+            "type": "string",
+            "default": "pt"
+          }
+        }
+      },
+      "tts": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "default": "elevenlabs"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "default": "eleven_multilingual_v2"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "stability": {
+            "type": "number"
+          },
+          "similarity": {
+            "type": "number"
+          }
+        }
+      }
     }
   },
   "uiHints": {
-    "wsPort": { "label": "WebSocket port", "placeholder": "8765" },
-    "authToken": { "label": "Auth Token", "sensitive": true, "placeholder": "token secreto compartilhado com o cliente" }
+    "wsPort": {
+      "label": "WebSocket port",
+      "placeholder": "8765"
+    },
+    "authToken": {
+      "label": "Auth Token",
+      "sensitive": true
+    },
+    "stt.apiKey": {
+      "label": "Deepgram API Key",
+      "sensitive": true
+    },
+    "stt.model": {
+      "label": "Deepgram Model",
+      "placeholder": "nova-3"
+    },
+    "stt.language": {
+      "label": "Language",
+      "placeholder": "pt"
+    },
+    "tts.apiKey": {
+      "label": "ElevenLabs API Key",
+      "sensitive": true
+    },
+    "tts.voice": {
+      "label": "ElevenLabs Voice ID"
+    },
+    "tts.model": {
+      "label": "ElevenLabs Model",
+      "placeholder": "eleven_multilingual_v2"
+    },
+    "tts.speed": {
+      "label": "Speed (0.7–1.2)"
+    },
+    "tts.stability": {
+      "label": "Stability (0–1)"
+    }
   }
 }
